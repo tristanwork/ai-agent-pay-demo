@@ -2,9 +2,13 @@ const {
   DARK_THEME,
   LIGHT_THEME,
   THEME_STORAGE_KEY,
+  THEME_TRANSITION_STYLE_ID,
   applyTheme,
+  buildThemeTransitionCss,
   createThemeToggleButton,
+  ensureThemeTransitionStyles,
   getInitialTheme,
+  installNavbarThemeToggle,
   mountThemeToggle,
   nextTheme,
   readStoredTheme,
@@ -64,9 +68,21 @@ function createDocument() {
     dataset: {},
     style: {},
   };
+  const elementsById = {};
+
+  const head = {
+    children: [],
+    appendChild(child) {
+      this.children.push(child);
+      if (child.id) {
+        elementsById[child.id] = child;
+      }
+    },
+  };
 
   return {
     documentElement,
+    head,
     createElement(tagName) {
       const listeners = {};
       return {
@@ -75,6 +91,7 @@ function createDocument() {
         children: [],
         className: "",
         dataset: {},
+        id: "",
         textContent: "",
         type: "",
         addEventListener(event, callback) {
@@ -89,7 +106,24 @@ function createDocument() {
         setAttribute(name, value) {
           this.attributes[name] = String(value);
         },
+        querySelector(selector) {
+          if (selector === "[data-theme-toggle='true']") {
+            return this.children.find((child) => child.dataset?.themeToggle === "true") || null;
+          }
+
+          return null;
+        },
       };
+    },
+    getElementById(id) {
+      return elementsById[id] || null;
+    },
+    querySelector(selector) {
+      if (selector === "nav, [role='navigation'], [data-theme-navbar]") {
+        return this.navbar || null;
+      }
+
+      return null;
     },
   };
 }
@@ -154,6 +188,29 @@ assert("next theme alternates from light to dark", nextTheme(LIGHT_THEME), DARK_
   assert("mount appends one toggle button", navbar.children.length, 1);
   assert("mounted child is returned button", navbar.children[0] === button, true);
   assert("button is marked as theme toggle", button.dataset.themeToggle, "true");
+}
+
+{
+  const documentRef = createDocument();
+  const css = buildThemeTransitionCss();
+  const style = ensureThemeTransitionStyles(documentRef);
+  const again = ensureThemeTransitionStyles(documentRef);
+  assert("transition css includes easing", css.includes("180ms ease"), true);
+  assert("style element is added once", documentRef.head.children.length, 1);
+  assert("style element has stable id", style.id, THEME_TRANSITION_STYLE_ID);
+  assert("style injection is idempotent", again === style, true);
+}
+
+{
+  const storage = createStorage();
+  const documentRef = createDocument();
+  const navbar = documentRef.createElement("nav");
+  documentRef.navbar = navbar;
+  const button = installNavbarThemeToggle({ document: documentRef, storage });
+  const again = installNavbarThemeToggle({ document: documentRef, storage });
+  assert("installer mounts button in navbar", navbar.children.length, 1);
+  assert("installer returns same existing button", again === button, true);
+  assert("installer marks navbar for transitions", navbar.dataset.themeNavbar, "true");
 }
 
 console.log(`\nTheme toggle results: ${passed} passed, ${failed} failed\n`);
